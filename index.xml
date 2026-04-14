@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="ReaSlideNote" commit="b9527f8b1469e2f0d3245e3e5573a84bb178dd34">
-  <category name="Effects/ReaSlideNote">
-    <reapack name="ReaSlideNote.jsfx" type="effect">
-      <version name="1.0.0" author="nisusansu" time="2026-04-14T22:12:59Z">
-        <source>https://raw.githubusercontent.com/nisusansu/ReaSlideNote/main/Effects/ReaSlideNote/ReaSlideNote.jsfx</source>
+<index version="1" name="ReaSlideNote" commit="fd13799e299328f617e145ac302cc16c555e35d7">
+  <category name="Scripts/ReaSlideNote">
+    <reapack name="ReaSlideNote.lua" type="script" desc="ReaSlideNote">
+      <version name="1.0.0" author="nisusansu" time="2026-04-14T23:37:11Z">
+        <source main="main" file="ReaSlideNote_Encoder.lua">https://raw.githubusercontent.com/nisusansu/ReaSlideNote/main/Scripts/ReaSlideNote/ReaSlideNote_Encoder.lua</source>
+        <source main="main" file="ReaSlideNote_Bake.lua">https://raw.githubusercontent.com/nisusansu/ReaSlideNote/main/Scripts/ReaSlideNote/ReaSlideNote_Bake.lua</source>
+        <source main="main" file="AddReaSlideNote.lua">https://raw.githubusercontent.com/nisusansu/ReaSlideNote/main/Scripts/ReaSlideNote/AddReaSlideNote.lua</source>
+        <source type="effect" file="../../Effects/ReaSlideNote/ReaSlideNote.jsfx">https://raw.githubusercontent.com/nisusansu/ReaSlideNote/main/Effects/ReaSlideNote/ReaSlideNote.jsfx</source>
       </version>
     </reapack>
   </category>
