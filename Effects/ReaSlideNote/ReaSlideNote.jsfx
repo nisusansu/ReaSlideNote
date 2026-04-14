@@ -1,0 +1,382 @@
+desc:ReaSlideNote
+tags:midi utility
+in_pin:none
+out_pin:none
+
+slider1:bend_range=12<1,48,1>Bend Range (semitones)
+
+@init
+ext_noinit = 1;
+
+update_step_samples = 16;
+slide_chan = 16;
+
+current_note_active = 0;
+current_note_pitch = 60;
+current_note_chan = 0;
+
+held_pitch_valid = 0;
+held_pitch = 60;
+
+slide_active = 0;
+slide_start_abs = 0;
+slide_end_abs = 0;
+slide_base_pitch = 60;
+slide_start_pitch = 60;
+slide_target_pitch = 60;
+slide_bend_chan = 0;
+
+last_bend14 = 8192;
+last_bend_chan = 0;
+last_play_state = 0;
+
+function clamp(v, lo, hi) local(outv)
+(
+  outv = v;
+  outv < lo ? (
+    outv = lo;
+  );
+  outv > hi ? (
+    outv = hi;
+  );
+  outv;
+);
+
+function semis_to_bend14(semis, range) local(v)
+(
+  v = 8192;
+  range > 0 ? (
+    v = 8192 + (semis / range) * 8192;
+    v = floor(clamp(v, 0, 16383));
+  );
+  v;
+);
+
+function send_pitch_bend(offset, bend14, chan) local(status, lsb, msb)
+(
+  bend14 = floor(clamp(bend14, 0, 16383));
+  chan = floor(clamp(chan, 0, 15));
+
+  status = $xE0 | chan;
+  lsb = bend14 & 127;
+  msb = (bend14 / 128) | 0;
+
+  midisend(offset, status, lsb, msb);
+);
+
+function get_bend_chan() local(outch)
+(
+  outch = last_bend_chan;
+
+  slide_active ? (
+    outch = slide_bend_chan;
+  ) : (
+    current_note_active ? (
+      outch = current_note_chan;
+    ) : (
+      held_pitch_valid ? (
+        outch = current_note_chan;
+      );
+    );
+  );
+
+  outch;
+);
+
+function get_desired_pitch(abs_samp) local(outp, dur, frac)
+(
+  outp = current_note_pitch;
+
+  held_pitch_valid ? (
+    outp = held_pitch;
+  );
+
+  slide_active ? (
+    abs_samp < slide_start_abs ? (
+      outp = slide_start_pitch;
+    ) : (
+      abs_samp < slide_end_abs ? (
+        dur = slide_end_abs - slide_start_abs;
+        dur <= 0 ? (
+          outp = slide_target_pitch;
+        ) : (
+          frac = (abs_samp - slide_start_abs) / dur;
+          frac = clamp(frac, 0, 1);
+          outp = slide_start_pitch + (slide_target_pitch - slide_start_pitch) * frac;
+        );
+      ) : (
+        outp = slide_target_pitch;
+      );
+    );
+  );
+
+  outp;
+);
+
+function sync_slide_state(abs_samp)
+(
+  slide_active ? (
+    abs_samp >= slide_end_abs ? (
+      held_pitch = slide_target_pitch;
+      held_pitch_valid = 1;
+      slide_active = 0;
+    );
+  );
+);
+
+function emit_bend_segment(start_ofs, end_ofs) local(ofs, abs_samp, desired_pitch, base_pitch, bend_chan, bend14, bend_changed, need_emit)
+(
+  need_emit = 0;
+
+  current_note_active ? (
+    need_emit = 1;
+  );
+  slide_active ? (
+    need_emit = 1;
+  );
+  held_pitch_valid ? (
+    need_emit = 1;
+  );
+
+  need_emit ? (
+    ofs = start_ofs;
+    while (ofs < end_ofs) (
+      abs_samp = block_start_abs + ofs;
+      desired_pitch = get_desired_pitch(abs_samp);
+
+      base_pitch = desired_pitch;
+
+      slide_active ? (
+        base_pitch = slide_base_pitch;
+      ) : (
+        current_note_active ? (
+          base_pitch = current_note_pitch;
+        ) : (
+          held_pitch_valid ? (
+            // release中も元ノート音高を基準に bend を維持する
+            base_pitch = current_note_pitch;
+          );
+        );
+      );
+
+      bend_chan = get_bend_chan();
+      bend14 = semis_to_bend14(desired_pitch - base_pitch, bend_range);
+
+      bend_changed = 0;
+      bend14 != last_bend14 ? (
+        bend_changed = 1;
+      );
+      bend_chan != last_bend_chan ? (
+        bend_changed = 1;
+      );
+
+      bend_changed ? (
+        send_pitch_bend(ofs, bend14, bend_chan);
+        last_bend14 = bend14;
+        last_bend_chan = bend_chan;
+      );
+
+      ofs += update_step_samples;
+    );
+  );
+);
+
+@slider
+bend_range = floor(max(1, bend_range));
+
+@block
+bend_range = floor(max(1, bend_range));
+
+is_playing_now = 0;
+play_state != 0 ? (
+  is_playing_now = 1;
+);
+
+is_playing_now == 0 ? (
+  last_play_state != 0 ? (
+    bend_chan = get_bend_chan();
+    send_pitch_bend(0, 8192, bend_chan);
+
+    current_note_active = 0;
+    held_pitch_valid = 0;
+    slide_active = 0;
+    last_bend14 = 8192;
+    last_bend_chan = bend_chan;
+  );
+);
+
+last_play_state = is_playing_now;
+
+block_start_abs = floor(play_position * srate + 0.5);
+block_end_abs = block_start_abs + samplesblock;
+
+sync_slide_state(block_start_abs);
+
+cursor_ofs = 0;
+
+buf = 0;
+maxlen = 65536;
+
+while ((recvlen = midirecv_buf(offset, buf, maxlen)) > 0) (
+  offset > cursor_ofs ? (
+    emit_bend_segment(cursor_ofs, offset);
+    cursor_ofs = offset;
+  );
+
+  event_abs = block_start_abs + offset;
+  sync_slide_state(event_abs);
+
+  is_helper_sysex = 0;
+  helper_version = 0;
+  is_noteon = 0;
+  is_noteoff = 0;
+  is_slide_note = 0;
+  pass_event = 1;
+
+  recvlen >= 13 ? (
+    buf[0] == $xF0 ? (
+      buf[1] == $x7D ? (
+        buf[2] == 82 ? (
+          buf[3] == 83 ? (
+            buf[4] == 78 ? (
+              buf[5] == 49 ? (
+                // RSN1
+                is_helper_sysex = 1;
+                helper_version = 1;
+              );
+              buf[5] == 50 ? (
+                // RSN2
+                recvlen >= 15 ? (
+                  is_helper_sysex = 1;
+                  helper_version = 2;
+                );
+              );
+            );
+          );
+        );
+      );
+    );
+  );
+
+  is_helper_sysex ? (
+    slide_bend_chan = buf[6];
+    slide_base_pitch = buf[7];
+    slide_start_pitch = buf[8];
+    slide_target_pitch = buf[9];
+
+    helper_version == 2 ? (
+      dur_ms = buf[12] + (buf[13] * 128);
+    ) : (
+      dur_ms = buf[10] + (buf[11] * 128);
+    );
+
+    slide_start_abs = event_abs;
+    slide_end_abs = slide_start_abs + floor((dur_ms * 0.001 * srate) + 0.5);
+    slide_active = 1;
+
+    pass_event = 0;
+  ) : (
+    status = buf[0] & $xF0;
+    chan0 = buf[0] & 15;
+    chan1 = chan0 + 1;
+
+    recvlen >= 3 ? (
+      status == $x90 ? (
+        buf[2] > 0 ? (
+          is_noteon = 1;
+        ) : (
+          is_noteoff = 1;
+        );
+      );
+
+      status == $x80 ? (
+        is_noteoff = 1;
+      );
+    );
+
+    chan1 == slide_chan ? (
+      is_noteon ? (
+        is_slide_note = 1;
+      );
+      is_noteoff ? (
+        is_slide_note = 1;
+      );
+    );
+
+    is_slide_note ? (
+      // slide note は鳴らさない
+      pass_event = 0;
+    ) : (
+      is_noteon ? (
+        preserve_same_offset_slide = 0;
+
+        // 同時刻に始まる「そのノート自身のslide」だけは維持
+        slide_active ? (
+          slide_start_abs == event_abs ? (
+            slide_base_pitch == buf[1] ? (
+              preserve_same_offset_slide = 1;
+            );
+          );
+        );
+
+        preserve_same_offset_slide == 0 ? (
+          slide_active = 0;
+          held_pitch_valid = 0;
+
+          bend_chan = get_bend_chan();
+          send_pitch_bend(offset, 8192, bend_chan);
+          last_bend14 = 8192;
+          last_bend_chan = bend_chan;
+        );
+
+        current_note_active = 1;
+        current_note_pitch = buf[1];
+        current_note_chan = chan0;
+
+        held_pitch = current_note_pitch;
+        held_pitch_valid = 1;
+
+        desired_pitch = get_desired_pitch(event_abs);
+
+        base_pitch = desired_pitch;
+        slide_active ? (
+          base_pitch = slide_base_pitch;
+        ) : (
+          base_pitch = current_note_pitch;
+        );
+
+        bend_chan = get_bend_chan();
+        bend14 = semis_to_bend14(desired_pitch - base_pitch, bend_range);
+        send_pitch_bend(offset, bend14, bend_chan);
+        last_bend14 = bend14;
+        last_bend_chan = bend_chan;
+      );
+
+      matched_current_note = 0;
+      current_note_active ? (
+        chan0 == current_note_chan ? (
+          buf[1] == current_note_pitch ? (
+            matched_current_note = 1;
+          );
+        );
+      );
+
+      is_noteoff ? (
+        matched_current_note ? (
+          // note-off時点の現在ピッチを保持して、release中も維持する
+          held_pitch = get_desired_pitch(event_abs);
+          held_pitch_valid = 1;
+
+          current_note_active = 0;
+        );
+      );
+    );
+  );
+
+  pass_event ? (
+    midisend_buf(offset, buf, recvlen);
+  );
+);
+
+sync_slide_state(block_end_abs);
+emit_bend_segment(cursor_ofs, samplesblock);

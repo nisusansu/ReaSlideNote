@@ -1,0 +1,11 @@
+-- @description ReaSlideNote
+-- @version 1.0.0
+-- @author nisusansu
+-- @metapackage
+-- @provides
+--   [main] ReaSlideNote_Encoder.lua
+--   [main] ReaSlideNote_Bake.lua
+--   [main] AddReaSlideNote.lua
+--   [effect] ../../Effects/ReaSlideNote/ReaSlideNote.jsfx
+
+-- ReaPack metapackage for ReaSlideNote.
